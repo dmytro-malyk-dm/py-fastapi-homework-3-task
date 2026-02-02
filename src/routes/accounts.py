@@ -55,8 +55,8 @@ router = APIRouter(prefix="/api/v1/accounts", tags=["accounts"])
     description="Create a new user account and return user id and email",
 )
 async def register_user(
-    user_data: UserRegistrationRequestSchema,
-    db: AsyncSession = Depends(get_db),
+        user_data: UserRegistrationRequestSchema,
+        db: AsyncSession = Depends(get_db),
 ) -> UserRegistrationResponseSchema:
     """Register a new user account."""
 
@@ -109,8 +109,8 @@ async def register_user(
     description="Activate a user account using email and activation token",
 )
 async def activate_account(
-    token_data: UserActivationRequestSchema,
-    db: AsyncSession = Depends(get_db),
+        token_data: UserActivationRequestSchema,
+        db: AsyncSession = Depends(get_db),
 ) -> MessageResponseSchema:
     """Activate a user account using email and activation token."""
 
@@ -135,7 +135,9 @@ async def activate_account(
         raise InvalidActivationTokenError()
 
     current_time = datetime.now(timezone.utc)
-    if activation_token.expires_at < current_time:
+    expires_at_aware = activation_token.expires_at.replace(tzinfo=timezone.utc)
+
+    if expires_at_aware < current_time:
         await db.delete(activation_token)
         await db.commit()
         raise InvalidActivationTokenError()
@@ -162,8 +164,8 @@ async def activate_account(
     description="Generate a password reset token for a user by email",
 )
 async def request_password_reset(
-    reset_data: PasswordResetRequestSchema,
-    db: AsyncSession = Depends(get_db),
+        reset_data: PasswordResetRequestSchema,
+        db: AsyncSession = Depends(get_db),
 ) -> MessageResponseSchema:
     """Request a password reset token."""
 
@@ -171,8 +173,10 @@ async def request_password_reset(
     result = await db.execute(user_query)
     user = result.scalar_one_or_none()
 
-    if not user:
-        raise UserNotFoundError(detail="User with this email does not exist.")
+    if not user or not user.is_active:
+        return MessageResponseSchema(
+            message="Password reset token has been sent to your email."
+        )
 
     existing_token_query = (
         select(PasswordResetTokenModel)
@@ -193,7 +197,6 @@ async def request_password_reset(
         await db.refresh(reset_token)
     except Exception:
         await db.rollback()
-        raise UserNotFoundError(detail="User with this email does not exist.")
 
     return MessageResponseSchema(
         message="Password reset token has been sent to your email."
@@ -208,8 +211,8 @@ async def request_password_reset(
     description="Reset user password using email, reset token and new password",
 )
 async def complete_password_reset(
-    reset_data: PasswordResetCompleteRequestSchema,
-    db: AsyncSession = Depends(get_db),
+        reset_data: PasswordResetCompleteRequestSchema,
+        db: AsyncSession = Depends(get_db),
 ) -> MessageResponseSchema:
     """Complete the password reset process."""
 
@@ -218,6 +221,9 @@ async def complete_password_reset(
     user = user_result.scalar_one_or_none()
 
     if not user:
+        raise InvalidResetTokenError()
+
+    if not user.is_active:
         raise InvalidResetTokenError()
 
     token_query = (
@@ -234,7 +240,9 @@ async def complete_password_reset(
         raise InvalidResetTokenError()
 
     current_time = datetime.now(timezone.utc)
-    if reset_token.expires_at < current_time:
+    expires_at_aware = reset_token.expires_at.replace(tzinfo=timezone.utc)
+
+    if expires_at_aware < current_time:
         await db.delete(reset_token)
         await db.commit()
         raise InvalidResetTokenError()
@@ -250,7 +258,10 @@ async def complete_password_reset(
         await db.commit()
     except Exception:
         await db.rollback()
-        raise InvalidResetTokenError()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while processing the request.",
+        )
 
     return MessageResponseSchema(
         message="Password reset successfully."
@@ -265,10 +276,10 @@ async def complete_password_reset(
     description="Authenticate user and return JWT access and refresh tokens",
 )
 async def login_user(
-    login_data: UserLoginRequestSchema,
-    db: AsyncSession = Depends(get_db),
-    jwt_manager: JWTAuthManagerInterface = Depends(get_jwt_auth_manager),
-    settings: BaseAppSettings = Depends(get_settings),
+        login_data: UserLoginRequestSchema,
+        db: AsyncSession = Depends(get_db),
+        jwt_manager: JWTAuthManagerInterface = Depends(get_jwt_auth_manager),
+        settings: BaseAppSettings = Depends(get_settings),
 ) -> UserLoginResponseSchema:
     """Authenticate user and return JWT tokens."""
 
@@ -326,9 +337,9 @@ async def login_user(
     description="Get a new access token using a valid refresh token",
 )
 async def refresh_access_token(
-    token_data: TokenRefreshRequestSchema,
-    db: AsyncSession = Depends(get_db),
-    jwt_manager: JWTAuthManagerInterface = Depends(get_jwt_auth_manager),
+        token_data: TokenRefreshRequestSchema,
+        db: AsyncSession = Depends(get_db),
+        jwt_manager: JWTAuthManagerInterface = Depends(get_jwt_auth_manager),
 ) -> TokenRefreshResponseSchema:
     """Refresh the access token using a valid refresh token."""
 
