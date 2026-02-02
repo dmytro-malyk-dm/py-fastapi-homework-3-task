@@ -24,7 +24,6 @@ from schemas.accounts import (
     UserActivationRequestSchema,
     MessageResponseSchema,
     PasswordResetRequestSchema,
-    PasswordResetTokenResponseSchema,
     PasswordResetCompleteRequestSchema,
     UserLoginRequestSchema,
     UserLoginResponseSchema,
@@ -53,7 +52,7 @@ router = APIRouter(prefix="/api/v1/accounts", tags=["accounts"])
     response_model=UserRegistrationResponseSchema,
     status_code=status.HTTP_201_CREATED,
     summary="Register a new user",
-    description="Create a new user account and return an activation token",
+    description="Create a new user account and return user id and email",
 )
 async def register_user(
     user_data: UserRegistrationRequestSchema,
@@ -97,7 +96,8 @@ async def register_user(
         raise EmailAlreadyExistsError()
 
     return UserRegistrationResponseSchema(
-        activation_token=activation_token.token
+        id=new_user.id,
+        email=new_user.email
     )
 
 
@@ -106,17 +106,27 @@ async def register_user(
     response_model=MessageResponseSchema,
     status_code=status.HTTP_200_OK,
     summary="Activate user account",
-    description="Activate a user account using the activation token from registration",
+    description="Activate a user account using email and activation token",
 )
 async def activate_account(
     token_data: UserActivationRequestSchema,
     db: AsyncSession = Depends(get_db),
 ) -> MessageResponseSchema:
-    """Activate a user account using activation token."""
+    """Activate a user account using email and activation token."""
+
+    user_query = select(UserModel).where(UserModel.email == token_data.email)
+    user_result = await db.execute(user_query)
+    user = user_result.scalar_one_or_none()
+
+    if not user:
+        raise InvalidActivationTokenError()
 
     token_query = (
         select(ActivationTokenModel)
-        .where(ActivationTokenModel.token == token_data.activation_token)
+        .where(
+            ActivationTokenModel.token == token_data.activation_token,
+            ActivationTokenModel.user_id == user.id
+        )
     )
     token_result = await db.execute(token_query)
     activation_token = token_result.scalar_one_or_none()
@@ -126,15 +136,6 @@ async def activate_account(
 
     current_time = datetime.now(timezone.utc)
     if activation_token.expires_at < current_time:
-        await db.delete(activation_token)
-        await db.commit()
-        raise InvalidActivationTokenError()
-
-    user_query = select(UserModel).where(UserModel.id == activation_token.user_id)
-    usr_result = await db.execute(user_query)
-    user = usr_result.scalar_one_or_none()
-
-    if not user:
         await db.delete(activation_token)
         await db.commit()
         raise InvalidActivationTokenError()
@@ -149,13 +150,13 @@ async def activate_account(
     await db.commit()
 
     return MessageResponseSchema(
-        detail="User account activated successfully."
+        message="User account activated successfully."
     )
 
 
 @router.post(
     "/password-reset/request/",
-    response_model=PasswordResetTokenResponseSchema,
+    response_model=MessageResponseSchema,
     status_code=status.HTTP_200_OK,
     summary="Request password reset token",
     description="Generate a password reset token for a user by email",
@@ -163,7 +164,7 @@ async def activate_account(
 async def request_password_reset(
     reset_data: PasswordResetRequestSchema,
     db: AsyncSession = Depends(get_db),
-) -> PasswordResetTokenResponseSchema:
+) -> MessageResponseSchema:
     """Request a password reset token."""
 
     user_query = select(UserModel).where(UserModel.email == reset_data.email)
@@ -194,8 +195,8 @@ async def request_password_reset(
         await db.rollback()
         raise UserNotFoundError(detail="User with this email does not exist.")
 
-    return PasswordResetTokenResponseSchema(
-        reset_token=reset_token.token
+    return MessageResponseSchema(
+        message="Password reset token has been sent to your email."
     )
 
 
@@ -204,7 +205,7 @@ async def request_password_reset(
     response_model=MessageResponseSchema,
     status_code=status.HTTP_200_OK,
     summary="Complete password reset",
-    description="Reset user password using the reset token and new password",
+    description="Reset user password using email, reset token and new password",
 )
 async def complete_password_reset(
     reset_data: PasswordResetCompleteRequestSchema,
@@ -212,27 +213,28 @@ async def complete_password_reset(
 ) -> MessageResponseSchema:
     """Complete the password reset process."""
 
+    user_query = select(UserModel).where(UserModel.email == reset_data.email)
+    user_result = await db.execute(user_query)
+    user = user_result.scalar_one_or_none()
+
+    if not user:
+        raise InvalidResetTokenError()
+
     token_query = (
         select(PasswordResetTokenModel)
-        .where(PasswordResetTokenModel.token == reset_data.reset_token)
+        .where(
+            PasswordResetTokenModel.token == reset_data.reset_token,
+            PasswordResetTokenModel.user_id == user.id
+        )
     )
-    result = await db.execute(token_query)
-    reset_token = result.scalar_one_or_none()
+    token_result = await db.execute(token_query)
+    reset_token = token_result.scalar_one_or_none()
 
     if not reset_token:
         raise InvalidResetTokenError()
 
     current_time = datetime.now(timezone.utc)
     if reset_token.expires_at < current_time:
-        await db.delete(reset_token)
-        await db.commit()
-        raise InvalidResetTokenError()
-
-    user_query = select(UserModel).where(UserModel.id == reset_token.user_id)
-    result = await db.execute(user_query)
-    user = result.scalar_one_or_none()
-
-    if not user:
         await db.delete(reset_token)
         await db.commit()
         raise InvalidResetTokenError()
@@ -251,7 +253,7 @@ async def complete_password_reset(
         raise InvalidResetTokenError()
 
     return MessageResponseSchema(
-        detail="Password reset successfully."
+        message="Password reset successfully."
     )
 
 
