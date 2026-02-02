@@ -5,15 +5,17 @@ from schemas.movies import (
     MovieCreateSchema,
     MovieUpdateSchema
 )
+
 from schemas.accounts import (
     UserRegistrationRequestSchema,
-    UserRegistrationResponseSchema,
     UserActivationRequestSchema,
-    MessageResponseSchema,
     PasswordResetRequestSchema,
     PasswordResetCompleteRequestSchema,
-    UserLoginResponseSchema,
     UserLoginRequestSchema,
     TokenRefreshRequestSchema,
-    TokenRefreshResponseSchema
+    UserRegistrationResponseSchema,
+    MessageResponseSchema,
+    PasswordResetTokenResponseSchema,
+    UserLoginResponseSchema,
+    TokenRefreshResponseSchema,
 )
